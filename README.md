@@ -1,18 +1,36 @@
+# TERCERA PRÁCTICA CALIFICADA - COMPUTACIÓN GRÁFICA
+<p align="center">
+  <img width="833" height="1015" alt="LOGO_UNI" src="https://github.com/user-attachments/assets/172ef688-84e2-46aa-9c60-c4d199e9dfdb" />
+</p>
+
 # Restauración y Super-Resolución de Video de la Televisión Peruana (2000–2010) con SRGAN
+
 
 Implementación de una red generativa adversaria de super-resolución (**SRGAN — Super-Resolution Generative Adversarial Network**) desarrollada en **TensorFlow/Keras** y ejecutada en **Google Colab**, orientada a restaurar y escalar material audiovisual de archivo de la televisión peruana de la década del 2000 (resoluciones SD comprimidas como **302x240** a 185 kbps) hacia calidad **HD (1208x960, escala x4)**, preservando la pista de audio original.
 
 ---
 
-## Objetivo del Proyecto
+##  Objetivos del Proyecto
 
-Adaptar una arquitectura SRGAN diseñada originalmente para imágenes estáticas cuadradas de rostros (`CelebA-HQ`) hacia un pipeline completo de **restauración de video de archivo**, resolviendo:
-1. **Baja resolución espacial:** Escalado **x4** desde **302x240** (240p) hasta **1208x960** (960p HD).
-2. **Degradaciones propias de TV antigua:** Eliminación de bloques de compresión (macrobloques MPEG/FLV), ruido analógico de cintas VHS y desenfoque por baja tasa de bits.
-3. **Preservación de identidad y audio:** Reconstrucción de rasgos faciales mediante pérdida perceptual (`VGG19`) y reensamblaje de audio sincronizado con `FFmpeg`.
+### Objetivo General
+Desarrollar e implementar un sistema de super-resolución y restauración de video  basado en una **Red Generativa Antagónica de Super-Resolución (SRGAN)**, capaz de mejorar la calidad visual y reducir los artefactos de compresión de material audiovisual antiguo con degradación tipo televisión analógica.
 
+### Objetivos Específicos
+- **Simular un *pipeline* de degradación realista:** Construir un proceso de preprocesamiento sobre el dataset **CelebA-HQ** que replique las fallas de transmisiones antiguas (desenfoque gaussiano, submuestreo y compresión JPEG agresiva) para entrenar el modelo frente a condiciones reales.
+- **Implementar una arquitectura SRGAN personalizada:** Diseñar un generador residual con capas de reescalado sub-píxel (`PixelShuffle`) y un discriminador convolucional entrenado mediante una función de pérdida híbrida (pérdida perceptual con **VGG19**, pérdida adversarial con *label smoothing* y pérdida a nivel de píxel `MAE`).
+- **Optimizar la inferencia sobre secuencias de video:** Procesar videos completos por micro-lotes en GPU y reintegrar de forma automatizada la pista de audio original mediante `FFmpeg` sin pérdida perceptible de calidad.
+- **Evaluar cuantitativa y visualmente los resultados:** Contrastar el desempeño del modelo frente a la interpolación bicúbica tradicional mediante las métricas **PSNR** y **SSIM**, complementadas con comparativas lado a lado e inspecciones con acercamiento (*zoom*).
 ---
+##  Requisitos y Dependencias
 
+El cuaderno está diseñado para ejecutarse en **Google Colab** con aceleración por GPU activada:
+- `tensorflow` / `keras`
+- `opencv-python` (`cv2`)
+- `scikit-image` (`psnr`, `ssim`)
+- `kagglehub`
+- `matplotlib`
+- `ffmpeg`
+El video es un segmento del programa humirístico peruano "El especial del Humor"
 ## Modelos Utilizados y su Rol en el Proyecto
 
 | Componente | Modelo / Arquitectura | Configuración en el Código | Función Específica en el Video de TV Perú |
@@ -23,134 +41,115 @@ Adaptar una arquitectura SRGAN diseñada originalmente para imágenes estáticas
 
 ---
 
-## Flujo de Trabajo para Mejorar el Video
+##  Estructura del Flujo de Ejecución
 
-1. **Preparación de Datos (`CelebA-HQ` -> Pares Sintéticos):** Se toman 3,000 fotos HD de rostros (`CelebA-HQ`), se recortan parches de **128x128** (HR) y se degradan artificialmente a **32x32** (LR) simulando el deterioro de la TV antigua.
-2. **Entrenamiento en 2 Fases:**
-   * **Fase 1 (10 épocas):** El Generador aprende la estructura y colores base minimizando el error absoluto (`MAE`).
-   * **Fase 2 (30 épocas):** Se activa el Discriminador y `VGG19` para recuperar texturas finas y nitidez en los bordes.
-3. **Inferencia por Lotes sobre el Video:** Se lee `video_original.mp4` (**302x240**), se agrupa en lotes de 4 fotogramas y el Generador predice los fotogramas restaurados en **1208x960**.
-4. **Ensamblaje de Audio y Evaluación:** `FFmpeg` une los fotogramas HD con el audio original del clip, generando el video final, una comparativa lado a lado (*Bicúbico vs. SRGAN*) y las métricas **PSNR** y **SSIM**.
+1. **Entrenamiento (`Celda 1`):**
+   - Descarga automática de 3,000 imágenes de `badasstechie/celebahq-resized-256x256` vía `kagglehub`.
+   - Entrena el modelo y exporta los pesos en `/content/srgan_tv_peru_gen.keras`.
+2. **Inferencia y Ensamblaje de Audio (`Celda 2`):**
+   - Requiere subir el archivo `/content/video_original.mp4`.
+   - Genera `resultado_final_srgan.mp4` (video restaurado con audio) y `comparativa_lado_a_lado.mp4` (Izquierda: Bicúbico | Derecha: SRGAN).
+3. **Análisis Visual con Zoom (`Celda 3`):**
+   - Extrae un fotograma en `t = 70s` y genera `comparativa_fotograma_zoom.png` con acercamiento en la región central.
+
+---
+##  Explicación de Bloques Clave del Código
+
+El flujo de trabajo del cuaderno está dividido en seis etapas principales:
+
+### 1. Preparación de Datos y Simulación de Degradación
+Antes de iniciar el entrenamiento, el script descarga una muestra de 3,000 imágenes en alta definición del dataset **CelebA-HQ** mediante `kagglehub` y construye un pipeline de degradación sintética en tiempo real:
+
+```python
+img_blur = cv2.GaussianBlur(hr_crop, (5, 5), 1.1)
+lr_img = cv2.resize(img_blur, (LR_SIZE, LR_SIZE), interpolation=cv2.INTER_AREA)
+encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), random.randint(30, 65)]
+_, encimg = cv2.imencode('.jpg', lr_img, encode_param)
+lr_img = cv2.imdecode(encimg, 1)
+```
+- **¿Qué hace?** Toma recortes de alta resolución (`128x128`) y les aplica secuencialmente desenfoque óptico (`GaussianBlur`), reducción de escala $\times 4$ (`32x32` con `INTER_AREA`) y compresión JPEG agresiva en memoria (calidad aleatoria entre `30` y `65`).
+- **Propósito:** Generar pares `(Imagen Degradada, Imagen Original)` que imiten los artefactos de transmisión de televisión analógica para que la red aprenda a revertirlos.
 
 ---
 
-## Explicación de Líneas Clave del Código
-
-A continuación se detallan las líneas más significativas de cada etapa del pipeline en Google Colab:
-
-### 1. Pipeline de Datos sin Desbordamiento de RAM (`tf.data`)
-Cargar miles de imágenes de `CelebA-HQ` en memoria RAM provoca que Google Colab se reinicie. Para evitarlo, las imágenes se leen y procesan por lotes bajo demanda desde el disco:
-
-```python
-dataset = tf.data.Dataset.from_tensor_slices(image_paths)
-dataset = dataset.shuffle(2000).map(tf_parse, num_parallel_calls=tf.data.AUTOTUNE)
-dataset = dataset.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
-```
-- `from_tensor_slices(image_paths)`: Crea un flujo ligero que solo almacena las rutas de texto de las imágenes, no los píxeles.
-- `.shuffle(2000)`: Mezcla aleatoriamente los ejemplos en cada época para evitar que la red memorice el orden del dataset.
-- `.map(tf_parse, num_parallel_calls=tf.data.AUTOTUNE)`: Aplica el recorte y la degradación en paralelo usando todos los núcleos de CPU disponibles.
-- `.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)`: Agrupa las imágenes en lotes de 16 y prepara el siguiente lote en memoria mientras la GPU T4 entrena con el lote actual.
-
----
-
-### 2. Simulación de la Degradación del Video de Archivo
-
-```python
-blurred = cv2.GaussianBlur(hr_crop, (5, 5), 1.1)
-lr_crop = cv2.resize(blurred, (LR_SIZE, LR_SIZE), interpolation=cv2.INTER_AREA)
-quality = np.random.randint(30, 65)
-_, encimg = cv2.imencode('.jpg', lr_crop, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-```
-- **Para qué sirve:** Replica los defectos exactos del archivo de TV peruana (desenfoque analógico + compresión fuerte a 185 kbps) sobre las fotos HD de `CelebA-HQ`, enseñando a la red a limpiar bloques pixelados antes de ampliar.
-
----
-
-### 3. Arquitectura del Generador: Bloques Residuales y `PixelShuffle`
-El Generador utiliza aprendizaje residual para conservar la información original del fotograma y solo predecir los detalles faltantes:
-
-```python
-def res_block(x):
-    skip = x
-    x = layers.Conv2D(64, 3, padding='same')(x)
-    x = layers.BatchNormalization()(x)
-    x = layers.PReLU(shared_axes=[1, 2])(x)
-    x = layers.Conv2D(64, 3, padding='same')(x)
-    x = layers.BatchNormalization()(x)
-    return layers.Add()([skip, x])
-```
-- `skip = x` y `layers.Add()([skip, x])`: **Conexión residual (Skip Connection)**. Permite que los gradientes fluyan sin desvanecerse y evita que el generador altere los colores o la estructura base del video.
-- `layers.PReLU(shared_axes=[1, 2])`: Función de activación *Parametric ReLU*, que aprende la pendiente para valores negativos (crucial para preservar detalles finos en sombras y texturas).
-
-Para aumentar el tamaño de la imagen sin crear patrones de cuadrícula (*checkerboard artifacts*), se usa **Sub-Pixel Convolution**:
+### 2. Construcción de las Redes Neuronales (Arquitectura SRGAN)
+Se definen los componentes estructurales del modelo mediante Keras:
 
 ```python
 @tf.keras.utils.register_keras_serializable()
 class PixelShuffle(layers.Layer):
-    def __init__(self, scale=2, **kwargs):
+    def __init__(self, scale, **kwargs):
         super().__init__(**kwargs)
         self.scale = scale
 
     def call(self, inputs):
         return tf.nn.depth_to_space(inputs, self.scale)
 ```
-- `tf.nn.depth_to_space(inputs, 2)`: Reorganiza un tensor de `256` canales de baja resolución en `64` canales con el **doble de ancho y alto (x2)**. Al ejecutar este bloque dos veces seguidas, se obtiene la ampliación final de **x4** (**302x240 -> 1208x960**).
-- `inputs = layers.Input(shape=(None, None, 3))`: Al dejar el alto y ancho como `None`, la red entrenada con parches de **32x32** puede recibir fotogramas completos rectangulares de **302x240** durante la inferencia.
+- **Capa `PixelShuffle`:** Capa personalizada registrada (`@register_keras_serializable`) que utiliza `tf.nn.depth_to_space` para reorganizar canales en píxeles espaciales, ampliando la imagen $\times 4$ sin generar artefactos de cuadrícula.
+- **Generador (`build_generator`):** Emplea 8 bloques residuales (*Skip Connections*) que conservan la estructura base de la escena mientras predicen los detalles de alta frecuencia.
+- **Discriminador (`build_discriminator`):** Red convolucional de 7 bloques con *strides* alternados que actúa como clasificador binario para distinguir entre fotogramas reales y reconstruidos.
 
 ---
 
-### 4. Entrenamiento en 2 Fases y Función de Pérdida Perceptual
-Entrenar una GAN desde cero suele ser inestable. Por ello el código divide el aprendizaje en dos etapas:
+### 3. Función de Pérdida Perceptual y Bucle de Entrenamiento
+En lugar de un entrenamiento estándar, se implementa un bucle personalizado con `tf.GradientTape()` dividido en dos fases:
 
 ```python
-# Fase 1: Pre-entrenamiento supervisado
-gen.compile(optimizer=tf.keras.optimizers.Adam(1e-4), loss='mae')
-gen.fit(dataset, epochs=EPOCHS_PRETRAIN)
+vgg = VGG19(weights="imagenet", include_top=False, input_shape=(HR_SIZE, HR_SIZE, 3))
+vgg.trainable = False
+feature_extractor = Model(inputs=vgg.input, outputs=vgg.get_layer("block5_conv4").output)
+
+# Dentro de train_step():
+real_labels = tf.ones((batch_size, 1)) * 0.9
+percep_loss = tf.reduce_mean(tf.square(vgg_real - vgg_fake))
+adv_loss = bce(tf.ones_like(fake_pred), fake_pred)
+pixel_loss = mae(hr, fake_hr)
+g_loss = 0.02 * percep_loss + 3e-3 * adv_loss + 1e-2 * pixel_loss
 ```
-- `loss='mae'`: Error Absoluto Medio (L1). Estabiliza el Generador durante las primeras 10 épocas para que produzca imágenes limpias y coherentes antes de enfrentarlo al Discriminador.
-
-En la **Fase 2 (Adversarial)**, se calcula la pérdida compuesta dentro de `train_step`:
-
-```python
-d_loss = 0.5 * (bce(tf.ones_like(real_logits) * 0.9, real_logits) + bce(tf.zeros_like(fake_logits), fake_logits))
-
-hr_vgg = vgg(applications.vgg19.preprocess_input((hr_imgs + 1.0) * 127.5))
-sr_vgg = vgg(applications.vgg19.preprocess_input((sr_imgs + 1.0) * 127.5))
-
-perceptual_loss = mse(hr_vgg, sr_vgg) * 0.02
-adversarial_loss = bce(tf.ones_like(fake_logits), fake_logits) * 3e-3
-pixel_loss = tf.reduce_mean(tf.abs(hr_imgs - sr_imgs)) * 1e-2
-
-g_loss = perceptual_loss + adversarial_loss + pixel_loss
-```
-- `tf.ones_like(real_logits) * 0.9`: **Label Smoothing**. Suaviza la etiqueta real de `1.0` a `0.9` para evitar que el Discriminador se vuelva demasiado estricto y bloquee el aprendizaje del Generador.
-- `hr_vgg` y `sr_vgg`: Pasa tanto la imagen HD real como la generada a través de `VGG19` (desnormalizando previamente de `[-1, 1]` a `[0, 255]`).
-- `perceptual_loss`: Compara las activaciones internas de `VGG19` (`block5_conv4`) mediante MSE. Esto obliga al modelo a reconstruir **bordes nítidos, ojos y texturas naturales** en lugar de promediar píxeles.
-- `adversarial_loss`: Penaliza al Generador si el Discriminador logra detectar que la imagen es falsa.
-- `pixel_loss`: Mantiene la fidelidad cromática respecto a la imagen original.
+- **Fase 1 (Pre-entrenamiento - 10 épocas):** Optimiza únicamente el generador mediante error absoluto medio (`MAE`) para estabilizar colores y formas base.
+- **Fase 2 (Entrenamiento Adversarial - 30 épocas):** Integra la red **VGG19** preentrenada (congelada en `block5_conv4`) para medir similitud de texturas profundas. Combina pérdida perceptual, adversarial y de píxel aplicando *label smoothing* (`0.9`) para evitar el colapso del discriminador, exportando finalmente el modelo en `srgan_tv_peru_gen.keras`.
 
 ---
 
-### 5. Inferencia por Lotes y Sincronización de Audio (`FFmpeg`)
-OpenCV procesa únicamente la pista visual, eliminando el sonido. En el script de procesamiento se realiza la inferencia acelerada y se reincorpora el audio original:
+### 4. Procesamiento e Inferencia de Video por Lotes
+Carga el generador entrenado y procesa el archivo de entrada (`video_original.mp4`):
 
 ```python
-preds = generator(batch_np, training=False).numpy()
-sr_rgb = np.clip((preds[i] + 1.0) * 127.5, 0, 255).astype(np.uint8)
+batch_tensor = np.array(batch_frames, dtype=np.float32) / 255.0
+sr_batch = generator.predict(batch_tensor, verbose=0)
+sr_batch = np.clip(sr_batch * 255.0, 0, 255).astype(np.uint8)
 ```
-- `training=False`: Desactiva la actualización de estadísticas en `BatchNormalization`, garantizando estabilidad de color entre fotogramas consecutivos.
-- `np.clip((preds[i] + 1.0) * 127.5, 0, 255)`: Convierte la salida de la capa `tanh` (rango `[-1, 1]`) al espacio estándar de imagen RGB de 8 bits (`[0, 255]`).
+- **Inferencia eficiente:** Normaliza los fotogramas al rango `[0, 1]` y los agrupa en micro-lotes (`BATCH_INFER = 4`) para aprovechar el paralelismo de la GPU sin saturar la memoria VRAM.
+- **Evaluación en tiempo real:** Genera en paralelo una versión escalada por interpolación bicúbica para calcular periódicamente (cada 30 fotogramas) las métricas de referencia **PSNR** y **SSIM**.
 
-Finalmente, `FFmpeg` empaqueta el video restaurado con la pista de audio intacta:
+---
+
+### 5. Post-procesamiento de Audio y Exportación (`FFmpeg`)
+Dado que OpenCV exporta flujos de video sin sonido, el sistema invoca `ffmpeg` mediante `subprocess` al finalizar la inferencia:
 
 ```python
 subprocess.run([
-    "ffmpeg", "-y", "-i", TEMP_VIDEO, "-i", INPUT_VIDEO,
+    "ffmpeg", "-y", "-i", temp_sr_video, "-i", VIDEO_INPUT,
     "-c:v", "libx264", "-crf", "18", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-map", "0:v:0", "-map", "1:a:0?", FINAL_OUTPUT
+    "-map", "0:v:0", "-map", "1:a:0?", "-c:a", "aac", "-shortest", FINAL_OUTPUT
 ], check=True)
 ```
-- `-c:v libx264 -crf 18`: Codifica el video resultante en H.264 de alta calidad visual (`crf 18` es prácticamente sin pérdida perceptible).
-- `-map 0:v:0 -map 1:a:0?`: Toma el flujo de video del archivo generado por la SRGAN (`0:v:0`) y copia la pista de audio original del archivo de entrada (`1:a:0`), manteniendo la sincronización exacta.
+- **Video final con audio:** Fusiona el video restaurado con la pista de audio original (`-map 0:v:0 -map 1:a:0?`), codificando en H.264 con calidad visualmente sin pérdidas (`-crf 18`).
+- **Comparativa sincronizada:** Utiliza el filtro `hstack` en un segundo comando para generar un video dividido lado a lado entre la interpolación bicúbica (izquierda) y el resultado SRGAN (derecha).
+
+---
+
+### 6. Inspección Visual con Recorte y Zoom
+Herramienta de auditoría visual ubicada en la última celda del cuaderno:
+
+```python
+cap.set(cv2.CAP_PROP_POS_FRAMES, int(70 * fps))
+# Recorte central de 250x250 píxeles sobre el fotograma reescalado
+crop_sr = sr_frame[cy-125:cy+125, cx-125:cx+125]
+crop_bic = bic_frame[cy-125:cy+125, cx-125:cx+125]
+```
+- **¿Qué hace?** Salta directamente al fotograma correspondiente al segundo `70`, lo procesa con ambos métodos y extrae una ventana central (`250x250` píxeles).
+- **Propósito:** Generar una matriz comparativa (`comparativa_fotograma_zoom.png`) que permite evaluar en detalle la recuperación de bordes y texturas finas frente al suavizado tradicional.
 
 ---
 
@@ -164,13 +163,50 @@ subprocess.run([
 | `comparativa_fotograma_zoom.png` | Captura estática de alta resolución con acercamiento (zoom) en rostros y detalles. |
 
 ---
+##  Resultados y Métricas
 
-## Evaluación de Resultados (Métricas y Análisis)
+Evaluación realizada sobre un video de prueba de **2,134 fotogramas** reescalado de `302x240` a `1208x960` ($\times 4$), tomando la interpolación bicúbica como línea base:
 
-Para validar el desempeño del modelo en la exposición se emplean dos enfoques complementarios:
+- **PSNR Promedio:** `26.69 dB`
+- **SSIM Promedio:** `0.8738`
 
-1. **Evaluación Cuantitativa (`PSNR` y `SSIM`):**
-   * **PSNR (Peak Signal-to-Noise Ratio):** Mide la fidelidad píxel a píxel en decibelios (dB). En modelos SRGAN, el PSNR suele ser moderado porque la red sintetiza texturas de alta frecuencia que no existían en el archivo comprimido original.
-   * **SSIM (Structural Similarity Index):** Evalúa la preservación estructural, luminancia y contraste percibido entre fotogramas.
-2. **Evaluación Cualitativa (Visual):**
-   * Comparación directa mediante `comparativa_lado_a_lado.mp4` y `comparativa_fotograma_zoom.png`, evidenciando la reducción de bloques de compresión JPEG/MPEG y la definición de contornos faciales frente a la interpolación bicúbica clásica.
+### Evidencia del Proceso
+
+### Entrenamiento
+<p align="center">
+<img width="921" height="548" alt="image" src="https://github.com/user-attachments/assets/80409a36-10b1-4e4a-8b71-69caaf360ffb" />
+  
+<img width="606" height="144" alt="image" src="https://github.com/user-attachments/assets/7788d762-a688-471d-83b7-623bdfaaf205" />
+</p>
+
+### Inferencia y Ensamblaje de Audio
+<p align="center">
+<img width="460" height="214" alt="image" src="https://github.com/user-attachments/assets/9965477e-602b-40ee-ae55-9ba2e8973fdd" />
+</p>
+
+### Análisis Visual muestra de fotograma
+<p align="center">
+<img width="894" height="735" alt="image" src="https://github.com/user-attachments/assets/4fbddc85-0980-4d18-862b-f67c5fb4dafc" />
+</p>
+*(Nota: En modelos SRGAN, valores moderados de PSNR/SSIM reflejan la generación de texturas de alta frecuencia más nítidas frente al desenfoque característico de la interpolación bicúbica).*
+
+---
+
+## Conclusiones y Análisis de Resultados
+
+- **Limpieza visual (*Denoising*):** El modelo **SRGAN** elimina de forma consistente el granulado analógico y los artefactos de compresión JPEG, logrando transiciones de color más limpias y uniformes en comparación con la interpolación bicúbica tradicional.
+- **Equilibrio entre fidelidad y nitidez:** Las métricas obtenidas (**PSNR: 26.69 dB** y **SSIM: 0.8738** en 2,134 fotogramas) junto con la función de pérdida perceptual (**VGG19**) confirman que el sistema conserva la estructura y colores originales sin generar deformaciones ni parpadeos entre cuadros.
+- **Limitación por dominio de entrenamiento:** Dado que la red se entrenó exclusivamente con rostros en primer plano (**CelebA-HQ**), la mejora es notable en la limpieza de señal pero más sutil en planos generales, movimiento rápido y texto, donde prioriza el suavizado sobre el afilado de bordes.
+- **Flujo viable y escalable:** El procesamiento por lotes en GPU y la integración automatizada de audio con `FFmpeg` demuestran que es posible restaurar y reescalar ($\times 4$) video de archivo de manera eficiente en Google Colab.
+- **Trabajo futuro:** Entrenar con datasets de escenas variadas (como **DIV2K**), aumentar la profundidad de la red y añadir consistencia temporal entre fotogramas para mejorar el detalle en fondos y elementos no faciales.
+
+## Créditos
+- **Video original utilizado para inferencia:** Fragmento extraído del programa televisivo *"El Especial del Humor"* — [Enlace en YouTube](https://youtu.be/koB9PA-bucQ).
+- **Dataset de entrenamiento:** [CelebA-HQ Resized](https://www.kaggle.com/datasets/badasstechie/celebahq-resized-256x256) vía Kaggle.
+
+> *Nota: El material audiovisual enlazado se empleó únicamente con fines académicos y de demostración experimental para la evaluación del modelo de super-resolución.*
+
+--- 
+<p align="center">
+José Manuel Montalvo Espinoza - Facultad de Ciencias de la Universidad Nacional de Ingeniería
+</p>
