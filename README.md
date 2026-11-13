@@ -30,13 +30,13 @@ El cuaderno está diseñado para ejecutarse en **Google Colab** con aceleración
 - `kagglehub`
 - `matplotlib`
 - `ffmpeg`
-El video es un segmento del programa humirístico peruano "El especial del Humor"
+
 ## Modelos Utilizados y su Rol en el Proyecto
 
 | Componente | Modelo / Arquitectura | Configuración en el Código | Función Específica en el Video de TV Perú |
 | :--- | :--- | :--- | :--- |
 | **Generador (G)** | **SRResNet** (Red Residual) | 8 bloques residuales + 2 capas `PixelShuffle(scale=2)` + entrada `(None, None, 3)` | Toma cada fotograma rectangular de **302x240**, limpia los cuadros de compresión de los 185 kbps y lo reconstruye a **1208x960** sin deformar el formato 4:3. |
-| **Discriminador (D)** | **CNN Clasificadora** | 8 capas `Conv2D` (`64` a `512` filtros) + `BatchNormalization` + `LeakyReLU(0.2)` | Evalúa parches de **128x128** durante el entrenamiento para penalizar al Generador si los rostros o bordes se ven plásticos o borrosos. |
+| **Discriminador (D)** | **CNN Clasificadora** | 7 capas `Conv2D` (`64` a `512` filtros) + `BatchNormalization` + `LeakyReLU(0.2)` | Evalúa parches de **128x128** durante el entrenamiento para penalizar al Generador si los rostros o bordes se ven plásticos o borrosos. |
 | **Extractor Perceptual** | **VGG19** (Pre-entrenada) | Pesos de ImageNet congelados (`trainable=False`), salida en `block5_conv4` | Compara rasgos faciales profundos (ojos, cabello, contornos) aprendidos de **CelebA-HQ** para proyectar nitidez real sobre los conductores y actores del video. |
 
 ---
